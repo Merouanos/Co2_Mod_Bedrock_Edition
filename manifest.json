@@ -1,0 +1,29 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "CO2 Research ",
+    "description": "Prototype Alpha plus",
+    "uuid": "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5f",
+    "version": [1, 0, 0], 
+    "min_engine_version": [1, 21, 0]
+  },
+  "modules": [
+    {
+      "description": "JavaScript Logic",
+      "type": "script",
+      "language": "javascript",
+      "uuid": "f1e2d3c4-b5a6-4f5e-bd9c-8b7a6f5e4d3c",
+      "version": [1, 0, 1],
+      "entry": "scripts/main.js"
+    }
+  ],
+  "dependencies": [
+    {
+      "module_name": "@minecraft/server",
+      "version": "1.11.0"
+    }
+    
+  ],"capabilities": [
+    "script_eval"
+]
+}
