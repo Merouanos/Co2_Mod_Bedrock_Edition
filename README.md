@@ -1,3 +1,6 @@
+![CO2 Reduce Icon](assets/pack_icon.png)
+
+
 🌍 CO2 Reduce: Bedrock Edition
 
 
