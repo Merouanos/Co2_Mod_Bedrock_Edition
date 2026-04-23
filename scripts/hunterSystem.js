@@ -1,6 +1,8 @@
 import { world, system, ItemStack } from "@minecraft/server";
 import { HUNTER, CO2 as CO2_THRESHOLDS } from "./config.js";
 import { co2 } from "./co2System.js";
+import { score } from "./scoreSystem.js";
+import { advisor } from "./advisorSystem.js";
 import {
     JOURNALS,
     GOOD_ENDING_JOURNAL,
@@ -8,6 +10,7 @@ import {
     STALK_MESSAGES,
     VANISH_MESSAGES,
     GOOD_END_RADIO,
+    BAD_END_HALLUCINATIONS,
 } from "./journals.js";
 
 // ── HUNTER PHASES ────────────────────────────────────────────────────────────
@@ -33,20 +36,19 @@ const PHASE = {
  */
 export class HunterSystem {
     constructor() {
-        this.HUNTER_TAG     = "the_hunter";
-        this.BOSS_TAG       = "hunter_boss";
-        this.phase          = PHASE.DORMANT;
+        this.HUNTER_TAG      = "the_hunter";
+        this.BOSS_TAG        = "hunter_boss";
+        this.phase           = PHASE.DORMANT;
 
-        // Timers
-        this.cooldownTicks  = 0;
-        this.stalkTimer     = 0;
-        this.goodTicks      = 0;    // Consecutive ticks of low CO2
+        this.cooldownTicks   = 0;
+        this.stalkTimer      = 0;
+        this.goodTicks       = 0;
         this.journalCooldown = 0;
+        this._hallucinationCooldown = 0; // Post-bad-ending
 
-        // Progress
-        this.journalIndex        = 0;     // Next journal to drop (0-indexed)
-        this.goodEndingDone      = false;
-        this.badEndingDone       = false;
+        this.journalIndex    = 0;
+        this.goodEndingDone  = false;
+        this.badEndingDone   = false;
     }
 
     /** Load saved hunter state. Call once at world start. */
@@ -73,6 +75,13 @@ export class HunterSystem {
         this._updateGoodTicks(level);
         this._updatePhase(level);
         this._runPhase(players);
+
+        // Notify advisor whether hunter is actively present
+        const isActive = this.phase !== PHASE.DORMANT && this.phase !== PHASE.GOOD_END;
+        advisor.setHunterActive(isActive);
+
+        // Post-bad-ending hallucinations
+        if (this.badEndingDone) this._tickHallucinations();
     }
 
     // ── PHASE LOGIC ───────────────────────────────────────────────────────────
@@ -238,15 +247,16 @@ export class HunterSystem {
         world.setDynamicProperty("hunter_good_ending", true);
         this.phase = PHASE.GOOD_END;
 
-        // Remove any active hunter
         const hunter = this._findHunter(players);
         if (hunter) this._vanish(hunter);
 
-        // Deliver the final journal + loot
+        score.onGoodEnding();
+
         const target = players[0];
         if (target) {
             this._displayJournal(GOOD_ENDING_JOURNAL);
             this._dropLoot(target.location, target.dimension, GOOD_ENDING_JOURNAL);
+            score.onJournalFound();
         }
 
         system.runTimeout(() => {
@@ -255,8 +265,8 @@ export class HunterSystem {
 
         system.runTimeout(() => {
             world.sendMessage(
-                "§7[A final journal lands at your feet. The Hunter steps backward into a " +
-                "shimmer of cold light... and is gone.]"
+                "§7[A final journal lands at your feet. The Hunter steps backward " +
+                "into a shimmer of cold light... and is gone.]"
             );
         }, 100);
     }
@@ -267,16 +277,14 @@ export class HunterSystem {
         this.phase = PHASE.BAD_END;
 
         this._displayJournal(BAD_ENDING_JOURNAL);
+        score.onJournalFound();
 
         system.runTimeout(() => {
             world.sendMessage("§4§l The Hunter: 'I gave you every chance. Now it ends.'");
         }, 60);
 
-        // Spawn a powered-up boss version close to every player
         system.runTimeout(() => {
-            for (const p of players) {
-                this._spawn(p, 8, /* isBoss */ true);
-            }
+            for (const p of players) this._spawn(p, 8, true);
         }, 120);
     }
 
@@ -305,6 +313,7 @@ export class HunterSystem {
             if (target) {
                 this._displayJournal(journal);
                 this._dropLoot(hunter.location, hunter.dimension, journal);
+                score.onJournalFound();
             }
 
             this.journalIndex++;
@@ -423,11 +432,28 @@ export class HunterSystem {
         try { entity.remove(); } catch (_) {}
     }
 
-    // ── MOB HELP ─────────────────────────────────────────────────────────────
+    // ── POST-BAD-ENDING HALLUCINATIONS ───────────────────────────────────────
     /**
-     * Hunter kills a nearby hostile mob — he wants to be the one to end the player.
-     * This makes him feel like a dark protector, building a twisted relationship.
+     * After the bad ending, the world never fully feels safe again.
+     * No Hunter spawns — just atmospheric chat messages that suggest his presence.
+     * Fires every 3–8 minutes randomly.
      */
+    _tickHallucinations() {
+        if (this._hallucinationCooldown > 0) {
+            this._hallucinationCooldown--;
+            return;
+        }
+        if (Math.random() > 0.004) return; // ~0.4% chance per update tick
+
+        world.sendMessage(this._pick(BAD_END_HALLUCINATIONS));
+
+        // Random cooldown: 3–8 minutes (in update ticks at 40ms each)
+        const minTicks  = (3 * 60 * 1000) / 40;
+        const maxTicks  = (8 * 60 * 1000) / 40;
+        this._hallucinationCooldown = Math.floor(minTicks + Math.random() * (maxTicks - minTicks));
+    }
+
+    // ── MOB HELP ─────────────────────────────────────────────────────────────
     _helpKillMob(hunter, players) {
         if (!hunter?.isValid()) return;
         const { player: p } = this._closestPlayer(hunter, players);
@@ -446,9 +472,9 @@ export class HunterSystem {
             if (HOSTILE.includes(mob.typeId)) {
                 try {
                     mob.kill();
-                    world.sendMessage("§8[The Hunter removed an obstacle... He wants that privilege for himself.]");
+                    world.sendMessage(VANISH_MESSAGES.MOB_KILL);
                 } catch (_) {}
-                break; // One kill per cycle
+                break;
             }
         }
     }

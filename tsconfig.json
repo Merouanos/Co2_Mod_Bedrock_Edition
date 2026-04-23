@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ES2020",
+    "moduleResolution": "bundler",
+    "outDir": "./scripts", 
+    "rootDir": "./src",    
+    "strict": true,
+    "noImplicitAny": true
+  }
+}

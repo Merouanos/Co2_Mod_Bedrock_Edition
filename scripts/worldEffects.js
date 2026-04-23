@@ -29,7 +29,7 @@ export class WorldEffectsSystem {
     /**
      * Main world change tick. Call every 20 ticks.
      */
-    tickWorld() {
+    tickWorld(isHeatWave = false) {
         const level = co2.global;
 
         // Nothing to do below caution threshold
@@ -125,7 +125,7 @@ export class WorldEffectsSystem {
         }
 
         // ── 2. DESERTIFICATION (≥480ppm) ──────────────────────────────────
-        if (level >= WORLD_FX.DESERTIFICATION) {
+        if (level >= WORLD_FX.DESERTIFICATION || isHeatWave) {
             if (id === "minecraft:grass_block") {
                 block.setType("minecraft:sand");
                 return;
