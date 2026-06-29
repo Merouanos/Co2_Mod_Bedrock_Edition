@@ -1,86 +1,98 @@
 /**
- * ╔═══════════════════════════════════════════════════════════════╗
- * ║             CO2 RESEARCH MOD — BEDROCK EDITION               ║
- * ║              main.js — System Orchestrator                   ║
- * ╠═══════════════════════════════════════════════════════════════╣
- * ║  Architecture:                                               ║
- * ║    config.js        — All tunable constants                  ║
- * ║    co2System.js     — Dual-pool CO2 management               ║
- * ║    hudSystem.js     — Action-bar HUD with overrides          ║
- * ║    playerEffects.js — Status effects, toxic air, acid rain   ║
- * ║    worldEffects.js  — Environmental degradation              ║
- * ║    eventHandlers.js — Block break/place, hunter combat       ║
- * ║    hunterSystem.js  — Full hunter AI + story state machine   ║
- * ║    journals.js      — Journal content + narrative arc        ║
- * ╚═══════════════════════════════════════════════════════════════╝
+ * ╔══════════════════════════════════════════════════════════════════╗
+ * ║          CO2 RESEARCH MOD — BEDROCK EDITION  v6                 ║
+ * ╠══════════════════════════════════════════════════════════════════╣
+ * ║  authSystem.js     ─ World identity + account linking           ║
+ * ║  comboSystem.js    ─ Action combo multiplier (addictive hook)   ║
+ * ║  challengeSystem.js─ 3 daily objectives + bonus                 ║
+ * ║  saplingSystem.js  ─ Sapling lifecycle / anti-cheese            ║
+ * ║  streakSystem.js   ─ Day streak + score multiplier              ║
+ * ║  climateEvents.js  ─ Random climate challenges                  ║
+ * ║  scoreSystem.js    ─ Score, badges, milestones                  ║
+ * ║  advisorSystem.js  ─ Contextual subtitle hints                  ║
+ * ║  hudSystem.js      ─ Action-bar HUD                             ║
+ * ║  playerEffects.js  ─ Status effects, toxic air, acid rain       ║
+ * ║  worldEffects.js   ─ Environmental degradation                  ║
+ * ║  eventHandlers.js  ─ Block/item events + combo/challenge hooks  ║
+ * ║  hunterSystem.js   ─ Hunter AI + endings                        ║
+ * ║  statsExporter.js  ─ Authenticated share code + live sync       ║
+ * ╚══════════════════════════════════════════════════════════════════╝
  */
 
 import { system } from "@minecraft/server";
 
-import { co2 }           from "./co2System.js";
-import { hud }           from "./hudSystem.js";
-import { playerEffects } from "./playerEffects.js";
-import { worldEffects }  from "./worldEffects.js";
-import { hunterSystem }  from "./hunterSystem.js";
-import { registerAll }   from "./eventHandlers.js";
-import { SCAN, HUNTER }  from "./config.js";
+import { auth }            from "./authSystem.js";
+import { co2 }             from "./co2System.js";
+import { hud }             from "./hudSystem.js";
+import { score }           from "./scoreSystem.js";
+import { streak }          from "./streakSystem.js";
+import { combo }           from "./comboSystem.js";
+import { challenges }      from "./challengeSystem.js";
+//import { saplingSystem }   from "./saplingSystem.js";
+import {saplingSys}         from "./saplingSys.js";
+import { climateEvents }   from "./climateEvents.js";
+import { advisor }         from "./advisorSystem.js";
+import { playerEffects }   from "./playerEffects.js";
+import { worldEffects }    from "./worldEffects.js";
+import { hunterSystem }    from "./hunterSystem.js";
+import { statsExporter }   from "./statsExporter.js";
+import { registerAll, tickProximityWarning, checkScoreMilestone } from "./eventHandlers.js";
+import { SCAN, HUNTER, CLIMATE_EVENTS } from "./config.js";
 
-// ── INITIALIZATION ────────────────────────────────────────────────────────────
-// Systems init in a staggered sequence so the world is fully loaded.
+// ── STAGGERED INIT ────────────────────────────────────────────────────────────
+system.runTimeout(() => { auth.init();           }, 10);
+system.runTimeout(() => { co2.init();            }, 20);
+system.runTimeout(() => { score.init();          }, 40);
+system.runTimeout(() => { streak.init();         }, 60);
+//system.runTimeout(() => { saplingSystem.init();  }, 80);
+system.runTimeout(() => {saplingSys.init();}, 20);
+system.runTimeout(() => { challenges.init();     }, 100);
+system.runTimeout(() => { hunterSystem.init();   }, 120);
+system.runTimeout(() => { advisor.init();        }, 140);
+system.runTimeout(() => { registerAll();         }, 160);
+system.runTimeout(() => { statsExporter.showOnLoad(); }, 350);
 
-system.runTimeout(() => {
-    co2.init();            // Load saved CO2 from world storage
-}, 10);
+// ── 1s TICKS ─────────────────────────────────────────────────────────────────
+system.runInterval(() => { hud.tick(); }, 20);
+system.runInterval(() => { playerEffects.tickEffects(); }, 20);
+system.runInterval(() => { playerEffects.tickToxicAtmosphere(); }, 20);
+system.runInterval(() => { worldEffects.tickWorld(climateEvents.isHeatWave); }, 20);
+system.runInterval(() => { combo.tick(); }, 20);          // Decay idle combo
+system.runInterval(() => { challenges.tick(); }, 20);     // Time-based challenge progress
+system.runInterval(() => { tickProximityWarning(); }, 20);
+system.runInterval(() => { checkScoreMilestone(); }, 20);
 
-system.runTimeout(() => {
-    hunterSystem.init();   // Load saved hunter progress (journals, endings)
-}, 30);
 
-system.runTimeout(() => {
-    registerAll();         // Attach all block/entity event listeners
-}, 50);
-
-// ── TICK SCHEDULES ────────────────────────────────────────────────────────────
-
-// 1. HUD — update action bar every second
+// ── 2s TICKS ─────────────────────────────────────────────────────────────────
 system.runInterval(() => {
-    hud.tick();
-}, 20);
-
-// 2. Player status effects — weakness, slowness, nausea every second
-system.runInterval(() => {
-    playerEffects.tickEffects();
-}, 20);
-
-// 3. Toxic atmosphere — tree shelter check + damage every second
-system.runInterval(() => {
-    playerEffects.tickToxicAtmosphere();
-}, 20);
-
-// 4. Acid rain — damage + terrain erosion every 2 seconds
-system.runInterval(() => {
-    playerEffects.tickAcidRain();
+    playerEffects.tickAcidRain(climateEvents.acidStormActive, climateEvents.clearSkies);
 }, 40);
+system.runInterval(() => { hunterSystem.update(); }, HUNTER.UPDATE_INTERVAL);
 
-// 5. World block effects — ice melt, desertification, deforestation, fires
-//    Runs every second, samples SCAN.SAMPLES_PER_TICK random blocks per player
-system.runInterval(() => {
-    worldEffects.tickWorld();
-}, 20);
 
-// 6. Sea level rise — slow flooding every ~2 minutes
-system.runInterval(() => {
-    worldEffects.tickSeaRise();
-}, SCAN.SEA_RISE_INTERVAL);
+// ── 3s TICKS ─────────────────────────────────────────────────────────────────
+system.runInterval(() => { score.tickSurvivor(); }, 60);
 
-// 7. Potential CO2 drain — once every full game-day (24000 ticks = 20 real min)
-//    This converts "queued" CO2 (from tree planting etc.) into global CO2
+// ── 1min TICKS ───────────────────────────────────────────────────────────────
 system.runInterval(() => {
+    score.setStreakMultiplier(streak.multiplier);
+    score.tickPassive();
+}, 1200);
+system.runInterval(() => { advisor.tick(); }, 1200);
+
+// ── CLIMATE EVENTS ────────────────────────────────────────────────────────────
+system.runInterval(() => { climateEvents.tickRoll(); }, CLIMATE_EVENTS.CHECK_INTERVAL);
+
+// ── SEA LEVEL (~2min) ─────────────────────────────────────────────────────────
+system.runInterval(() => { worldEffects.tickSeaRise(); }, SCAN.SEA_RISE_INTERVAL);
+
+// ── GAME-DAY (24000 ticks ≈ 20 real minutes) ─────────────────────────────────
+system.runInterval(() => {
+    co2.addDailyEmission();
     co2.tickPotential();
+    streak.tickDay();
+    score.setStreakMultiplier(streak.multiplier);
+    //saplingSystem.tickDay();
+    challenges.tickDay(saplingSystem._currentDay);
+    statsExporter.tickDaily();
 }, 24000);
-
-// 8. Hunter AI — evaluated every HUNTER.UPDATE_INTERVAL ticks (~2 seconds)
-//    Kept slower than world effects to reduce entity query overhead
-system.runInterval(() => {
-    hunterSystem.update();
-}, HUNTER.UPDATE_INTERVAL);

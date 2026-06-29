@@ -2,6 +2,7 @@ import { world, system } from "@minecraft/server";
 import { PLAYER_FX } from "./config.js";
 import { co2 } from "./co2System.js";
 import { hud } from "./hudSystem.js";
+import { advisor } from "./advisorSystem.js";
 
 /**
  * PlayerEffectsSystem
@@ -55,6 +56,9 @@ export class PlayerEffectsSystem {
         for (const player of world.getAllPlayers()) {
             const protected_ = this._isUnderCanopy(player);
 
+            // Keep advisor informed so it can fire the canopy hint
+            advisor.setNearLeaves(protected_);
+
             if (protected_) {
                 hud.setOverride(
                     player,
@@ -92,9 +96,10 @@ export class PlayerEffectsSystem {
      * Acid rain mechanic. Call every 40 ticks.
      * Rain becomes acidic at CO2 ≥ 600 — hurts exposed players, erodes terrain.
      */
-    tickAcidRain() {
+    tickAcidRain(isAcidStorm = false, clearSkies = false) {
         const level = co2.global;
-        if (level < PLAYER_FX.ACID_RAIN_CO2) return;
+        if (clearSkies) return;
+        if (level < PLAYER_FX.ACID_RAIN_CO2 && !isAcidStorm) return;
 
         let isRaining = false;
         try {
